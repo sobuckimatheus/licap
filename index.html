@@ -232,7 +232,7 @@
 var CONFIG = {
   whatsapp: "554899166069",   // número que recebe os leads (55 + DDD + número)
   pixelId: "1684404472795258", // ID do Pixel do Meta
-  webhookUrl: ""             // URL do n8n, Make, CRM etc. para salvar o lead (opcional)
+  webhookUrl: ""             // URL do app da planilha Google (Apps Script), termina em /exec
 };
 
 /* ========================================================= */
@@ -241,6 +241,7 @@ var CONFIG = {
   var TOTAL_Q = steps.length - 1; // a tela de fotos não conta como pergunta
   var cur = 0;
   var data = {};
+  var leadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   var hdr = document.getElementById("hdr");
   var back = document.getElementById("back");
   var bar = document.getElementById("bar");
@@ -265,6 +266,18 @@ var CONFIG = {
     fbq('track', 'PageView');
   }
   function px(ev){ try{ if (window.fbq) fbq('track', ev); }catch(e){} }
+
+  // Envia dados para a planilha. Se falhar, a página continua normalmente.
+  function enviarPlanilha(obj){
+    if (!CONFIG.webhookUrl) return;
+    try {
+      fetch(CONFIG.webhookUrl, {
+        method: "POST", mode: "no-cors", keepalive: true,
+        headers: {"Content-Type": "text/plain;charset=UTF-8"},
+        body: JSON.stringify(obj)
+      }).catch(function(){});
+    } catch(e){}
+  }
 
   function show(i){
     steps[cur].classList.remove("active");
@@ -339,17 +352,18 @@ var CONFIG = {
     document.getElementById("wa").href = link;
     document.getElementById("done-title").textContent = "Perfeito, " + primeiroNome(nome) + "! Falta só um passo: suas fotos";
 
-    // Salva o lead no webhook (se configurado), mesmo que a pessoa não chegue no WhatsApp
-    if (CONFIG.webhookUrl) {
-      var payload = Object.assign({}, data, track, {pagina: location.href.split("?")[0], data_hora: new Date().toISOString()});
-      try {
-        fetch(CONFIG.webhookUrl, {
-          method: "POST", mode: "no-cors", keepalive: true,
-          headers: {"Content-Type": "text/plain;charset=UTF-8"},
-          body: JSON.stringify(payload)
-        });
-      } catch(e){}
-    }
+    // Salva o lead na planilha assim que ele toca em Continuar, mesmo que não chegue no WhatsApp
+    enviarPlanilha(Object.assign({}, track, {
+      tipo: "cadastro",
+      id: leadId,
+      nome: data.nome,
+      whatsapp: data.whatsapp,
+      whatsapp_formatado: tel.value,
+      interesse: data.interesse || "",
+      regiao: data.regiao || "",
+      prazo: data.prazo || "",
+      pagina: location.origin + location.pathname
+    }));
 
     show(cur + 1);
   });
@@ -360,7 +374,11 @@ var CONFIG = {
     var href = this.href;
     if (!href || href.slice(-1) === "#") return;
     e.preventDefault();
-    if (!leadEnviado) { px("Lead"); leadEnviado = true; }
+    if (!leadEnviado) {
+      px("Lead");
+      enviarPlanilha({tipo: "whatsapp", id: leadId}); // marca na planilha que clicou no WhatsApp
+      leadEnviado = true;
+    }
     setTimeout(function(){ window.location.href = href; }, 400);
   });
 
